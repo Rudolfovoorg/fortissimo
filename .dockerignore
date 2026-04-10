@@ -1,0 +1,5 @@
+*.tar
+consumer_power_prediction_model.pkl
+.git
+HPCFolder-fortissimoSpecifc
+__pycache__/

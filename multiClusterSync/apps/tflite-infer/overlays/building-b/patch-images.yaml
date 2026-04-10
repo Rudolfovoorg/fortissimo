@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tflite-infer
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: fetch-model
+          image: _DOCKER_IMAGE_:building-b-61f2303
+      containers:
+        - name: tflite-infer
+          image: _DOCKER_IMAGE_:server-743ffeb

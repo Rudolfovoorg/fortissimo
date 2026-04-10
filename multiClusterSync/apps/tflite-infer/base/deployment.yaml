@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tflite-infer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tflite-infer
+  template:
+    metadata:
+      labels:
+        app: tflite-infer
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      nodeSelector:
+        kubernetes.io/arch: arm64
+
+      volumes:
+        - name: model-vol
+          emptyDir: {}
+
+      initContainers:
+        - name: fetch-model
+          image: _DOCKER_IMAGE_:MODEL_TAG_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          command:
+          - sh
+          - -c
+          - |
+            cp /model/* /models/ && \
+            ls -lah /models
+          volumeMounts:
+            - name: model-vol
+              mountPath: /models
+
+      containers:
+        - name: tflite-infer
+          image: _DOCKER_IMAGE_:SERVER_TAG_PLACEHOLDER
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8050
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "3Gi"
+              cpu: "2"
+          env:
+            - name: MODEL_PATH
+              value: "/models/model.tflite"
+            - name: SCALERX_PATH
+              value: "/models/scalerx.pkl"
+            - name: SCALERY_PATH
+              value: "/models/scalery.pkl"
+            - name: FEATURE_COLUMNS
+              value: "/models/featurecol.pkl"
+            - name: TFLITE_THREADS
+              value: "2"
+          volumeMounts:
+            - name: model-vol
+              mountPath: /models
+          readinessProbe:
+            httpGet: { path: /health, port: 8050 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet: { path: /health, port: 8050 }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /health, port: 8050 }
+            initialDelaySeconds: 30
+            periodSeconds: 10

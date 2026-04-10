@@ -1,0 +1,80 @@
+name: Build & Deploy Server
+
+on:
+  push:
+    paths:
+      - "apps/tflite-infer/base/**"
+      - ".github/workflows/build-server.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-push-and-bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set tag
+        id: vars
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "SERVER_TAG=server-${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push server image (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/tflite-infer/base
+          file: ./apps/tflite-infer/base/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            zahribc/simple-tf:${{ steps.vars.outputs.SERVER_TAG }}
+
+      - name: Update overlay server image tag
+        run: |
+          set -euo pipefail
+          BASE_DIR="apps/tflite-infer/overlays"
+
+          for DIR in "$BASE_DIR"/building-*; do
+            FILE="$DIR/patch-images.yaml"
+            if [ -f "$FILE" ]; then
+              echo "Updating $FILE"
+              sed -i -E "s|(image:\s*zahribc/simple-tf:)server-[^[:space:]]+|\1${{ steps.vars.outputs.SERVER_TAG }}|g" "$FILE"
+              grep -n "image: zahribc/simple-tf:" "$FILE" || true
+            else
+              echo "Skipping $DIR (no patch-images.yaml)"
+            fi
+          done
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage ALL overlays (not just building-a)
+          git add apps/tflite-infer/overlays/building-*/patch-images.yaml
+
+          # Only commit if there are changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(server): bump to ${{ steps.vars.outputs.SERVER_TAG }}"
+          git push

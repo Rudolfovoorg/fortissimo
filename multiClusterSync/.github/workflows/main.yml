@@ -1,0 +1,146 @@
+name: Build & Deploy Model (any building)
+
+on:
+  push:
+    paths:
+      - "apps/tflite-infer/overlays/**"
+  workflow_dispatch: {}
+
+jobs:
+  build-push-bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed overlay buildings
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            if [[ -z "${BEFORE}" || "${BEFORE}" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              echo "WARN: invalid/unavailable before=${BEFORE}; falling back to previous commit of HEAD"
+              BEFORE="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || true)"
+              if [ -z "$BEFORE" ]; then
+                echo "WARN: No previous commit available to diff against."
+                echo "BUILDINGS=" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+          else
+            BEFORE="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || true)"
+            AFTER="$(git rev-parse HEAD)"
+            if [ -z "$BEFORE" ]; then
+              echo "WARN: No previous commit available to diff against."
+              echo "BUILDINGS=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "Diff range: $BEFORE..$AFTER"
+
+          mapfile -t BUILDINGS < <(
+            git diff --name-only "$BEFORE" "$AFTER" \
+              | awk -F/ '/^apps\/tflite-infer\/overlays\/[^\/]+\// {print $4}' \
+              | sort -u
+          )
+
+          if [ "${#BUILDINGS[@]}" -eq 0 ]; then
+            echo "No building overlay changes detected."
+            echo "BUILDINGS=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed buildings: ${BUILDINGS[*]}"
+          echo "BUILDINGS=${BUILDINGS[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if nothing to do
+        if: ${{ steps.detect.outputs.BUILDINGS == '' }}
+        run: echo "No overlay changes; exiting."
+
+      - name: Login to Docker Hub
+        if: ${{ steps.detect.outputs.BUILDINGS != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        if: ${{ steps.detect.outputs.BUILDINGS != '' }}
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.detect.outputs.BUILDINGS != '' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build, push, and bump overlays
+        if: ${{ steps.detect.outputs.BUILDINGS != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA="${GITHUB_SHA::7}"
+
+          for BUILDING in ${{ steps.detect.outputs.BUILDINGS }}; do
+            echo "=== Processing building: $BUILDING ==="
+
+            CONTEXT="./apps/tflite-infer/overlays/${BUILDING}"
+            DOCKERFILE="${CONTEXT}/Dockerfile"
+            PATCH_FILE="${CONTEXT}/patch-images.yaml"
+            TAG="${BUILDING}-${SHORT_SHA}"
+
+            if [ ! -d "$CONTEXT" ]; then
+              echo "WARN: Overlay folder not found: $CONTEXT (skipping)"
+              continue
+            fi
+            if [ ! -f "$DOCKERFILE" ]; then
+              echo "WARN: Dockerfile not found: $DOCKERFILE (skipping)"
+              continue
+            fi
+            if [ ! -f "$PATCH_FILE" ]; then
+              echo "WARN: patch-images.yaml not found: $PATCH_FILE (skipping)"
+              continue
+            fi
+
+            echo "Building & pushing: zahribc/simple-tf:${TAG}"
+            docker buildx build \
+              --platform linux/arm64 \
+              -f "$DOCKERFILE" \
+              -t "zahribc/simple-tf:${TAG}" \
+              --push \
+              "$CONTEXT"
+
+            echo "Updating $PATCH_FILE -> ${TAG}"
+            sed -i "s|image: zahribc/simple-tf:${BUILDING}-.*|image: zahribc/simple-tf:${TAG}|g" "$PATCH_FILE"
+            grep -n "fetch-model" -A2 "$PATCH_FILE" || true
+
+            echo
+          done
+
+      - name: Commit and push (all updates)
+        if: ${{ steps.detect.outputs.BUILDINGS != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add "apps/tflite-infer/overlays/*/patch-images.yaml"
+
+          if git diff --cached --quiet; then
+            echo "No patch updates to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(model): bump overlays to ${GITHUB_SHA::7}"
+          git push
