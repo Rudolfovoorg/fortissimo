@@ -111,16 +111,16 @@ jobs:
               continue
             fi
 
-            echo "Building & pushing: zahribc/simple-tf:${TAG}"
+            echo "Building & pushing: _DOCKER_IMAGE_:${TAG}"
             docker buildx build \
               --platform linux/arm64 \
               -f "$DOCKERFILE" \
-              -t "zahribc/simple-tf:${TAG}" \
+              -t "_DOCKER_IMAGE_:${TAG}" \
               --push \
               "$CONTEXT"
 
             echo "Updating $PATCH_FILE -> ${TAG}"
-            sed -i "s|image: zahribc/simple-tf:${BUILDING}-.*|image: zahribc/simple-tf:${TAG}|g" "$PATCH_FILE"
+            sed -i "s|image: _DOCKER_IMAGE_:${BUILDING}-.*|image: _DOCKER_IMAGE_:${TAG}|g" "$PATCH_FILE"
             grep -n "fetch-model" -A2 "$PATCH_FILE" || true
 
             echo

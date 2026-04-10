@@ -43,7 +43,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            zahribc/simple-tf:${{ steps.vars.outputs.SERVER_TAG }}
+            _DOCKER_IMAGE_:${{ steps.vars.outputs.SERVER_TAG }}
 
       - name: Update overlay server image tag
         run: |
@@ -54,8 +54,8 @@ jobs:
             FILE="$DIR/patch-images.yaml"
             if [ -f "$FILE" ]; then
               echo "Updating $FILE"
-              sed -i -E "s|(image:\s*zahribc/simple-tf:)server-[^[:space:]]+|\1${{ steps.vars.outputs.SERVER_TAG }}|g" "$FILE"
-              grep -n "image: zahribc/simple-tf:" "$FILE" || true
+              sed -i -E "s|(image:\s*_DOCKER_IMAGE_:)server-[^[:space:]]+|\1${{ steps.vars.outputs.SERVER_TAG }}|g" "$FILE"
+              grep -n "image: _DOCKER_IMAGE_:" "$FILE" || true
             else
               echo "Skipping $DIR (no patch-images.yaml)"
             fi
