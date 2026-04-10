@@ -147,7 +147,7 @@ def main():
 
                         for client in clients.itertuples():
                             # if (False): # testing predicition pipeline
-                            #db.delete_PVPower_predictions_from(today_midnight-timedelta(days=7),client.Id)
+                            db.delete_PVPower_predictions_from(today_midnight-timedelta(days=7),client.Id)
                             dl.file_cleanup()
                             measurements , serving_data1,energy_data =db.getPVRelevantData(client.Id)
                             train_test_data= ml.pv_data_agregation(measurements,energy_data)
