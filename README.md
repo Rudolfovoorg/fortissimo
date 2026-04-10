@@ -1,8 +1,6 @@
 ﻿# fortissimo
 
 ## Data and Code Availability
-The data and code used for the analysis presented in this paper are fully available in the GitHub repository:  
-`https://github.com/xxxxxx`
 
 This repository includes instructions for:
 - accessing the original data,
